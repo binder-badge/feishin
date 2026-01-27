@@ -420,14 +420,15 @@ const CompactItemCard = ({
                                 row !== null && row !== undefined,
                         )
                         .map((row, index) => (
-                            <div
+                            <Text
                                 className={clsx(styles.row, {
                                     [styles.muted]: index > 0,
                                 })}
                                 key={row.id}
+                                size={index > 0 ? 'sm' : 'md'}
                             >
                                 &nbsp;
-                            </div>
+                            </Text>
                         ))}
                 </div>
             </div>
@@ -636,14 +637,15 @@ const DefaultItemCard = ({
                         (row): row is NonNullable<typeof row> => row !== null && row !== undefined,
                     )
                     .map((row, index) => (
-                        <div
+                        <Text
                             className={clsx(styles.row, {
                                 [styles.muted]: index > 0,
                             })}
                             key={row.id}
+                            size={index > 0 ? 'sm' : 'md'}
                         >
                             &nbsp;
-                        </div>
+                        </Text>
                     ))}
             </div>
         </div>
@@ -922,14 +924,15 @@ const PosterItemCard = ({
                         (row): row is NonNullable<typeof row> => row !== null && row !== undefined,
                     )
                     .map((row, index) => (
-                        <div
+                        <Text
                             className={clsx(styles.row, {
                                 [styles.muted]: index > 0,
                             })}
                             key={row.id}
+                            size={index > 0 ? 'sm' : 'md'}
                         >
                             &nbsp;
-                        </div>
+                        </Text>
                     ))}
             </div>
         </div>
@@ -1062,7 +1065,7 @@ export const getDataRows = (type?: 'compact' | 'default' | 'poster'): DataRow[] 
                             : null;
 
                     if (originalYear !== null && originalYear !== releaseYear) {
-                        return `♫ ${originalYear}${SEPARATOR_STRING}${releaseYear}`;
+                        return `${originalYear}${SEPARATOR_STRING}${releaseYear}`;
                     }
 
                     return String(releaseYear);
@@ -1079,7 +1082,7 @@ export const getDataRows = (type?: 'compact' | 'default' | 'poster'): DataRow[] 
                         data.originalDate &&
                         data.originalDate !== data.releaseDate
                     ) {
-                        return `♫ ${formatDateAbsoluteUTC(data.originalDate)}${SEPARATOR_STRING}${formatDateAbsoluteUTC(data.releaseDate)}`;
+                        return `${formatDateAbsoluteUTC(data.originalDate)}${SEPARATOR_STRING}${formatDateAbsoluteUTC(data.releaseDate)}`;
                     }
 
                     return `${formatDateAbsoluteUTC(data.releaseDate)}`;

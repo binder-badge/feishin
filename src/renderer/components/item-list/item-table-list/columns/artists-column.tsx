@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Fragment, memo, useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 import { generatePath, Link } from 'react-router';
 
 import styles from './album-artists-column.module.css';
@@ -16,9 +16,10 @@ import { Text } from '/@/shared/components/text/text';
 import { LibraryItem, RelatedAlbumArtist, Song } from '/@/shared/types/domain-types';
 
 const AlbumArtistsColumn = (props: ItemTableListInnerColumn) => {
-    const row: RelatedAlbumArtist[] | undefined = (
-        props.data as (RelatedAlbumArtist[] | undefined)[]
-    )[props.rowIndex]?.[props.columns[props.columnIndex].id];
+    const rowItem = props.getRowItem?.(props.rowIndex) ?? (props.data as any[])[props.rowIndex];
+    const row: RelatedAlbumArtist[] | undefined = (rowItem as any)?.[
+        props.columns[props.columnIndex].id
+    ];
 
     const artists = useMemo(() => {
         if (!row) return [];
@@ -67,7 +68,8 @@ const AlbumArtistsColumn = (props: ItemTableListInnerColumn) => {
 };
 
 const SongArtistsColumn = (props: ItemTableListInnerColumn) => {
-    const row: Song | undefined = (props.data as (Song | undefined)[])[props.rowIndex];
+    const row: Song | undefined = (props.getRowItem?.(props.rowIndex) ??
+        (props.data as any[])[props.rowIndex]) as Song | undefined;
 
     if (row) {
         return (
@@ -107,6 +109,4 @@ const BaseArtistsColumn = (props: ItemTableListInnerColumn) => {
     }
 };
 
-const ArtistsColumnMemo = memo(BaseArtistsColumn);
-
-export { ArtistsColumnMemo as ArtistsColumn };
+export { BaseArtistsColumn as ArtistsColumn };

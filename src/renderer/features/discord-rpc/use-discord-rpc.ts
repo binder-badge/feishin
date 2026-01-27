@@ -1,6 +1,6 @@
 import { SetActivity, StatusDisplayType } from '@xhayper/discord-rpc';
 import isElectron from 'is-electron';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '/@/renderer/api';
 import { useItemImageUrl } from '/@/renderer/components/item-image/item-image';
@@ -12,6 +12,7 @@ import {
     useLastfmApiKey,
     usePlayerSong,
     usePlayerStore,
+    useSettingsStore,
     useTimestampStoreBase,
 } from '/@/renderer/store';
 import { sentenceCase } from '/@/renderer/utils';
@@ -196,7 +197,7 @@ export const useDiscordRpc = () => {
 
                 if (discordSettings.showServerImage && song) {
                     if (song._uniqueId === currentSong?._uniqueId && imageUrlRef.current) {
-                        if (song._serverType === ServerType.JELLYFIN && song.imageUrl) {
+                        if (song._serverType === ServerType.JELLYFIN) {
                             activity.largeImageKey = imageUrlRef.current;
                         } else if (
                             song._serverType === ServerType.NAVIDROME ||
@@ -409,4 +410,22 @@ export const useDiscordRpc = () => {
         privateMode,
         setActivity,
     ]);
+};
+
+const DiscordRpcHookInner = () => {
+    useDiscordRpc();
+    return null;
+};
+
+export const DiscordRpcHook = () => {
+    const isElectronEnv = isElectron();
+    const isDiscordRpcEnabled = useSettingsStore((state) => state.discord.enabled);
+    const isPrivateMode = useAppStore((state) => state.privateMode);
+    const discordRpc = isElectronEnv ? window.api.discordRpc : null;
+
+    if (!isElectronEnv || !discordRpc || !isDiscordRpcEnabled || isPrivateMode) {
+        return null;
+    }
+
+    return React.createElement(DiscordRpcHookInner);
 };

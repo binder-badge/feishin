@@ -126,7 +126,9 @@ const installExtensions = async () => {
                     type: 'info',
                 });
             })
-            .catch(console.error);
+            .catch(() => {
+                // Ignore
+            });
     });
 };
 
@@ -185,13 +187,21 @@ const createWinThumbarButtons = () => {
 };
 
 const createTray = () => {
+    let trayIcon: Electron.NativeImage | string;
+
     if (isMacOS()) {
-        return;
+        const iconPath = getAssetPath('icons/IconTemplate.png');
+        const icon = nativeImage.createFromPath(iconPath);
+        icon.setTemplateImage(true);
+        trayIcon = icon;
+    } else if (isLinux()) {
+        trayIcon = getAssetPath('icons/icon.png');
+    } else {
+        trayIcon = getAssetPath('icons/icon.ico');
     }
 
-    tray = isLinux()
-        ? new Tray(getAssetPath('icons/icon.png'))
-        : new Tray(getAssetPath('icons/icon.ico'));
+    tray = new Tray(trayIcon);
+
     const contextMenu = Menu.buildFromTemplate([
         {
             click: () => {
@@ -275,8 +285,8 @@ async function createWindow(first = true): Promise<void> {
         autoHideMenuBar: true,
         frame: false,
         height: 900,
-        icon: getAssetPath('icons/icon.png'),
-        minHeight: 640,
+        icon: isWindows() ? getAssetPath('icons/icon.ico') : getAssetPath('icons/icon.png'),
+        minHeight: 120,
         minWidth: 480,
         show: false,
         webPreferences: {

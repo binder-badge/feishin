@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useItemImageUrl } from '/@/renderer/components/item-image/item-image';
 import { usePlayerEvents } from '/@/renderer/features/player/audio-player/hooks/use-player-events';
@@ -8,6 +8,7 @@ import {
     usePlaybackSettings,
     usePlayerSong,
     usePlayerStore,
+    useSettingsStore,
     useTimestampStoreBase,
 } from '/@/renderer/store';
 import { LogCategory, logFn } from '/@/renderer/utils/logger';
@@ -121,6 +122,7 @@ export const useScrobble = () => {
                         {
                             apiClientProps: { serverId: currentSong._serverId || '' },
                             query: {
+                                albumId: currentSong.albumId,
                                 event: 'timeupdate',
                                 id: currentSong.id,
                                 position,
@@ -163,6 +165,7 @@ export const useScrobble = () => {
                         {
                             apiClientProps: { serverId: currentSong._serverId || '' },
                             query: {
+                                albumId: currentSong.albumId,
                                 id: currentSong.id,
                                 position,
                                 submission: true,
@@ -245,6 +248,7 @@ export const useScrobble = () => {
                         {
                             apiClientProps: { serverId: currentSong._serverId || '' },
                             query: {
+                                albumId: currentSong.albumId,
                                 event: 'start',
                                 id: currentSong.id,
                                 position: 0,
@@ -306,6 +310,7 @@ export const useScrobble = () => {
                 {
                     apiClientProps: { serverId: currentSong._serverId || '' },
                     query: {
+                        albumId: currentSong.albumId,
                         event: 'timeupdate',
                         id: currentSong.id,
                         position,
@@ -353,6 +358,7 @@ export const useScrobble = () => {
                     {
                         apiClientProps: { serverId: currentSong._serverId || '' },
                         query: {
+                            albumId: currentSong.albumId,
                             event: 'pause',
                             id: currentSong.id,
                             position,
@@ -378,6 +384,7 @@ export const useScrobble = () => {
                     {
                         apiClientProps: { serverId: currentSong._serverId || '' },
                         query: {
+                            albumId: currentSong.albumId,
                             event: 'unpause',
                             id: currentSong.id,
                             position,
@@ -418,4 +425,20 @@ export const useScrobble = () => {
         },
         [handleScrobbleFromSongChange, handleProgressUpdate, handleScrobbleFromSeek],
     );
+};
+
+const ScrobbleHookInner = () => {
+    useScrobble();
+    return null;
+};
+
+export const ScrobbleHook = () => {
+    const isScrobbleEnabled = useSettingsStore((state) => state.playback.scrobble.enabled);
+    const privateMode = useAppStore((state) => state.privateMode);
+
+    if (!isScrobbleEnabled || privateMode) {
+        return null;
+    }
+
+    return React.createElement(ScrobbleHookInner);
 };

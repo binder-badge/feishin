@@ -133,6 +133,8 @@ const normalizeSong = (
     server?: null | ServerListItemWithCredential,
     pathReplace?: string,
     pathReplaceWith?: string,
+    playlistIndex?: number,
+    discTitleMap?: Map<number, string>,
 ): Song => {
     const participants = getParticipants(item);
 
@@ -155,7 +157,7 @@ const normalizeSong = (
         container: item.contentType,
         createdAt: item.created,
         discNumber: item.discNumber || 1,
-        discSubtitle: null,
+        discSubtitle: discTitleMap?.get(item.discNumber ?? 1) ?? null,
         duration: item.duration ? item.duration * 1000 : 0,
         explicitStatus:
             item.explicitStatus === 'explicit'
@@ -189,6 +191,7 @@ const normalizeSong = (
                   }
                 : null,
         playCount: item?.playCount || 0,
+        playlistItemId: playlistIndex !== undefined ? playlistIndex.toString() : undefined,
         releaseDate: null,
         releaseYear: item.year || null,
         sampleRate: item.samplingRate || null,
@@ -265,6 +268,12 @@ const normalizeAlbum = (
     pathReplace?: string,
     pathReplaceWith?: string,
 ): Album => {
+    const discTitleMap = new Map<number, string>();
+
+    (item as z.infer<typeof ssType._response.album>).discTitles?.forEach((discTitle) => {
+        discTitleMap.set(discTitle.disc, discTitle.title);
+    });
+
     const releaseDate =
         item.releaseDate &&
         typeof item.releaseDate.year === 'number' &&
@@ -310,7 +319,7 @@ const normalizeAlbum = (
         songCount: item.songCount,
         songs:
             (item as z.infer<typeof ssType._response.album>).song?.map((song) =>
-                normalizeSong(song, server, pathReplace, pathReplaceWith),
+                normalizeSong(song, server, pathReplace, pathReplaceWith, undefined, discTitleMap),
             ) || [],
         tags: null,
         updatedAt: item.created,
@@ -397,6 +406,8 @@ const normalizeFolder = (
             songs: results?.songs || [],
         },
         id: item.id.toString(),
+        imageId: item.coverArt?.toString() || null,
+        imageUrl: null,
         name: item.title,
         parentId: item.parent,
     };

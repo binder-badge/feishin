@@ -68,7 +68,6 @@ export interface PlayerData {
 
 export interface QueueData {
     default: string[];
-    priority: string[];
     shuffled: number[];
     songs: Record<string, QueueSong>;
 }
@@ -258,6 +257,8 @@ export type Folder = {
         songs: Song[];
     };
     id: string;
+    imageId?: null | string;
+    imageUrl?: null | string;
     name: string;
     parentId?: string;
 };
@@ -487,7 +488,7 @@ export interface AlbumListQuery extends AlbumListNavidromeQuery, BaseQuery<Album
 // Album List
 export type AlbumListResponse = BasePaginatedResponse<Album[]>;
 
-export type ListCountQuery<TQuery> = Omit<TQuery, 'limit' | 'startIndex'>;
+export type ListCountQuery<TQuery> = Omit<TQuery, 'startIndex'>;
 
 interface AlbumListNavidromeQuery {
     hasRating?: boolean;
@@ -1200,6 +1201,7 @@ export type InternetProviderLyricResponse = {
 export type InternetProviderLyricSearchResponse = {
     artist: string;
     id: string;
+    isSync: boolean | null;
     name: string;
     score?: number;
     source: LyricSource;
@@ -1237,6 +1239,7 @@ export type ScrobbleArgs = BaseEndpointArgs & {
 };
 
 export type ScrobbleQuery = {
+    albumId?: string;
     event?: 'pause' | 'start' | 'timeupdate' | 'unpause';
     id: string;
     position?: number;
@@ -1615,7 +1618,6 @@ export type StructuredUnsyncedLyric = Omit<FullLyricsMetadata, 'lyrics'> & {
 };
 
 export type Tag = {
-    id: string;
     name: string;
     options: { id: string; name: string }[];
 };
@@ -1631,12 +1633,11 @@ export type TagListQuery = {
 };
 
 export type TagListResponse = {
-    boolTags?: string[];
-    enumTags?: { name: string; options: { id: string; name: string }[] }[];
     excluded: {
         album: string[];
         song: string[];
     };
+    tags?: Tag[];
 };
 
 export type UserInfoArgs = BaseEndpointArgs & { query: UserInfoQuery };

@@ -15,7 +15,7 @@ import {
 import { LibraryContainer } from '/@/renderer/features/shared/components/library-container';
 import { LibraryHeaderBar } from '/@/renderer/features/shared/components/library-header-bar';
 import { PageErrorBoundary } from '/@/renderer/features/shared/components/page-error-boundary';
-import { useFastAverageColor, useWaitForColorCalculation } from '/@/renderer/hooks';
+import { useFastAverageColor } from '/@/renderer/hooks';
 import { useAlbumBackground, useCurrentServer } from '/@/renderer/store';
 import { LibraryItem } from '/@/shared/types/domain-types';
 
@@ -31,8 +31,7 @@ const AlbumDetailRoute = () => {
 
     const detailQuery = useQuery({
         ...albumQueries.detail({ query: { id: albumId }, serverId: server?.id }),
-        initialData: location.state?.item,
-        staleTime: 0,
+        placeholderData: location.state?.item,
     });
 
     const imageUrl =
@@ -52,14 +51,7 @@ const AlbumDetailRoute = () => {
 
     const showBlurredImage = albumBackground;
 
-    const { isReady } = useWaitForColorCalculation({
-        hasImage: !!imageUrl,
-        isLoading: isColorLoading,
-        routeId: albumId,
-        showBlurredImage,
-    });
-
-    if (!isReady) {
+    if (isColorLoading) {
         return null;
     }
 

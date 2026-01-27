@@ -3,7 +3,7 @@ import mergeWith from 'lodash/mergeWith';
 import { nanoid } from 'nanoid';
 import { generatePath } from 'react-router';
 import { z } from 'zod';
-import { devtools, persist } from 'zustand/middleware';
+import { devtools, persist, subscribeWithSelector } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { shallow } from 'zustand/shallow';
 import { createWithEqualityFn } from 'zustand/traditional';
@@ -385,6 +385,11 @@ const VisualizerSettingsSchema = z.object({
     type: z.enum(['audiomotionanalyzer', 'butterchurn']),
 });
 
+export enum HomeFeatureStyle {
+    MULTIPLE = 'multiple',
+    SINGLE = 'single',
+}
+
 export const GeneralSettingsSchema = z.object({
     accent: z
         .string()
@@ -409,6 +414,7 @@ export const GeneralSettingsSchema = z.object({
     followSystemTheme: z.boolean(),
     genreTarget: GenreTargetSchema,
     homeFeature: z.boolean(),
+    homeFeatureStyle: z.nativeEnum(HomeFeatureStyle),
     homeItems: z.array(SortableItemSchema(HomeItemSchema)),
     imageRes: z.object({
         fullScreenPlayer: z.number(),
@@ -964,6 +970,7 @@ const initialState: SettingsState = {
         followSystemTheme: false,
         genreTarget: GenreTarget.TRACK,
         homeFeature: true,
+        homeFeatureStyle: HomeFeatureStyle.SINGLE,
         homeItems,
         imageRes: {
             fullScreenPlayer: 0,
@@ -1628,160 +1635,105 @@ const initialState: SettingsState = {
     },
 };
 
-// Helper function to create a deep clone of initialState
-const getInitialState = (): SettingsState => {
-    const freshHomeItems = Object.values(HomeItem).map((item) => ({
-        disabled: false,
-        id: item,
-    }));
-
-    const freshArtistItems = Object.values(ArtistItem).map((item) => ({
-        disabled: false,
-        id: item,
-    }));
-
-    const freshArtistReleaseTypeItems = Object.values(ArtistReleaseTypeItem).map((item) => ({
-        disabled: false,
-        id: item,
-    }));
-
-    // Deep clone using JSON to ensure all nested objects/arrays are fresh copies
-    const clonedState = JSON.parse(JSON.stringify(initialState)) as SettingsState;
-
-    // Replace arrays that need fresh references
-    clonedState.general.homeItems = freshHomeItems;
-    clonedState.general.artistItems = freshArtistItems;
-    clonedState.general.artistReleaseTypeItems = freshArtistReleaseTypeItems;
-    clonedState.general.sidebarItems = JSON.parse(
-        JSON.stringify(sidebarItems),
-    ) as SidebarItemType[];
-
-    // Regenerate random password for remote settings
-    clonedState.remote.password = randomString(8);
-
-    return clonedState;
-};
-
 export const useSettingsStore = createWithEqualityFn<SettingsSlice>()(
     persist(
         devtools(
-            immer((set) => ({
-                actions: {
-                    reset: () => {
-                        const freshState = getInitialState();
-                        set((state) => {
-                            // Deep clone the fresh state to ensure all nested objects/arrays are new references
-                            const resetState = JSON.parse(
-                                JSON.stringify(freshState),
-                            ) as SettingsState;
+            subscribeWithSelector(
+                immer((set) => ({
+                    actions: {
+                        reset: () => {
+                            localStorage.removeItem('store_settings');
+                            window.location.reload();
+                        },
+                        resetSampleRate: () => {
+                            set((state) => {
+                                state.playback.mpvProperties.audioSampleRateHz = 0;
+                            });
+                        },
+                        setArtistItems: (items) => {
+                            set((state) => {
+                                state.general.artistItems = items;
+                            });
+                        },
+                        setArtistReleaseTypeItems: (
+                            items: SortableItem<ArtistReleaseTypeItem>[],
+                        ) => {
+                            set((state) => {
+                                state.general.artistReleaseTypeItems = items;
+                            });
+                        },
+                        setGenreBehavior: (target: GenreTarget) => {
+                            set((state) => {
+                                state.general.genreTarget = target;
+                            });
+                        },
+                        setHomeItems: (items: SortableItem<HomeItem>[]) => {
+                            set((state) => {
+                                state.general.homeItems = items;
+                            });
+                        },
+                        setList: (type: ItemListKey, data: DeepPartial<ItemListSettings>) => {
+                            set((state) => {
+                                const listState = state.lists[type];
 
-                            // Override playback type for web if not electron
-                            if (!isElectron()) {
-                                resetState.playback.type = PlayerType.WEB;
-                            }
+                                if (listState && data.table) {
+                                    Object.assign(listState.table, data.table);
+                                    delete data.table;
+                                }
 
-                            // Replace all state properties (except actions) with the reset state
-                            state.css = resetState.css;
-                            state.discord = resetState.discord;
-                            state.font = resetState.font;
-                            state.general = resetState.general;
-                            state.hotkeys = resetState.hotkeys;
-                            state.lists = resetState.lists;
-                            state.lyrics = resetState.lyrics;
-                            state.playback = resetState.playback;
-                            state.queryBuilder = resetState.queryBuilder;
-                            state.remote = resetState.remote;
-                            state.tab = resetState.tab;
-                            state.visualizer = resetState.visualizer;
-                            state.window = resetState.window;
-                        });
-                    },
-                    resetSampleRate: () => {
-                        set((state) => {
-                            state.playback.mpvProperties.audioSampleRateHz = 0;
-                        });
-                    },
-                    setArtistItems: (items) => {
-                        set((state) => {
-                            state.general.artistItems = items;
-                        });
-                    },
-                    setArtistReleaseTypeItems: (items: SortableItem<ArtistReleaseTypeItem>[]) => {
-                        set((state) => {
-                            state.general.artistReleaseTypeItems = items;
-                        });
-                    },
-                    setGenreBehavior: (target: GenreTarget) => {
-                        set((state) => {
-                            state.general.genreTarget = target;
-                        });
-                    },
-                    setHomeItems: (items: SortableItem<HomeItem>[]) => {
-                        set((state) => {
-                            state.general.homeItems = items;
-                        });
-                    },
-                    setList: (type: ItemListKey, data: DeepPartial<ItemListSettings>) => {
-                        set((state) => {
-                            const listState = state.lists[type];
+                                if (listState && data.grid) {
+                                    Object.assign(listState.grid, data.grid);
+                                    delete data.grid;
+                                }
 
-                            if (listState && data.table) {
-                                Object.assign(listState.table, data.table);
-                                delete data.table;
-                            }
-
-                            if (listState && data.grid) {
-                                Object.assign(listState.grid, data.grid);
-                                delete data.grid;
-                            }
-
-                            if (listState) {
-                                Object.assign(listState, data);
-                            }
-                        });
+                                if (listState) {
+                                    Object.assign(listState, data);
+                                }
+                            });
+                        },
+                        setPlaybackFilters: (filters: PlayerFilter[]) => {
+                            set((state) => {
+                                state.playback.filters = filters;
+                            });
+                        },
+                        setSettings: (data) => {
+                            set((state) => {
+                                deepMergeIntoState(state, data);
+                            });
+                        },
+                        setSidebarItems: (items: SidebarItemType[]) => {
+                            set((state) => {
+                                state.general.sidebarItems = items;
+                            });
+                        },
+                        setTable: (type: ItemListKey, data: DataTableProps) => {
+                            set((state) => {
+                                const listState = state.lists[type];
+                                if (listState) {
+                                    listState.table = data;
+                                }
+                            });
+                        },
+                        setTranscodingConfig: (config) => {
+                            set((state) => {
+                                state.playback.transcode = config;
+                            });
+                        },
+                        toggleMediaSession: () => {
+                            set((state) => {
+                                state.playback.mediaSession = !state.playback.mediaSession;
+                            });
+                        },
+                        toggleSidebarCollapseShare: () => {
+                            set((state) => {
+                                state.general.sidebarCollapseShared =
+                                    !state.general.sidebarCollapseShared;
+                            });
+                        },
                     },
-                    setPlaybackFilters: (filters: PlayerFilter[]) => {
-                        set((state) => {
-                            state.playback.filters = filters;
-                        });
-                    },
-                    setSettings: (data) => {
-                        set((state) => {
-                            deepMergeIntoState(state, data);
-                        });
-                    },
-                    setSidebarItems: (items: SidebarItemType[]) => {
-                        set((state) => {
-                            state.general.sidebarItems = items;
-                        });
-                    },
-                    setTable: (type: ItemListKey, data: DataTableProps) => {
-                        set((state) => {
-                            const listState = state.lists[type];
-                            if (listState) {
-                                listState.table = data;
-                            }
-                        });
-                    },
-                    setTranscodingConfig: (config) => {
-                        set((state) => {
-                            state.playback.transcode = config;
-                        });
-                    },
-                    toggleMediaSession: () => {
-                        set((state) => {
-                            state.playback.mediaSession = !state.playback.mediaSession;
-                        });
-                    },
-                    toggleSidebarCollapseShare: () => {
-                        set((state) => {
-                            state.general.sidebarCollapseShared =
-                                !state.general.sidebarCollapseShared;
-                        });
-                    },
-                },
-                ...initialState,
-            })),
+                    ...initialState,
+                })),
+            ),
             { name: 'store_settings' },
         ),
         {
@@ -1958,10 +1910,94 @@ export const useSettingsStore = createWithEqualityFn<SettingsSlice>()(
                     }
                 }
 
+                if (version <= 20) {
+                    // Add TITLE_ARTIST column to SONG and ALBUM table configs
+                    const titleArtistColumn: ItemTableListColumnConfig = {
+                        align: 'start',
+                        autoSize: false,
+                        id: TableColumn.TITLE_ARTIST,
+                        isEnabled: false,
+                        pinned: null,
+                        width: 300,
+                    };
+
+                    const listKeysToUpdate: (LibraryItem | string)[] = [
+                        LibraryItem.SONG,
+                        LibraryItem.ALBUM,
+                        LibraryItem.PLAYLIST_SONG,
+                        LibraryItem.QUEUE_SONG,
+                        ItemListKey.ALBUM_DETAIL,
+                        ItemListKey.FULL_SCREEN,
+                        ItemListKey.SIDE_QUEUE,
+                    ];
+
+                    listKeysToUpdate.forEach((listKey) => {
+                        const listConfig = state.lists[listKey];
+                        if (listConfig?.table?.columns) {
+                            const columns = listConfig.table.columns;
+                            const hasTitleArtist = columns.some(
+                                (col) => col.id === TableColumn.TITLE_ARTIST,
+                            );
+                            if (!hasTitleArtist) {
+                                const titleCombinedIndex = columns.findIndex(
+                                    (col) => col.id === TableColumn.TITLE_COMBINED,
+                                );
+                                if (titleCombinedIndex >= 0) {
+                                    columns.splice(titleCombinedIndex + 1, 0, titleArtistColumn);
+                                } else {
+                                    columns.push(titleArtistColumn);
+                                }
+                            }
+                        }
+                    });
+                }
+
+                if (version <= 21) {
+                    // Add COMPOSER column to SONG and ALBUM table configs
+                    const composerColumn: ItemTableListColumnConfig = {
+                        align: 'start',
+                        autoSize: false,
+                        id: TableColumn.COMPOSER,
+                        isEnabled: false,
+                        pinned: null,
+                        width: 300,
+                    };
+
+                    const listKeysToUpdate: (LibraryItem | string)[] = [
+                        LibraryItem.SONG,
+                        LibraryItem.ALBUM,
+                        LibraryItem.PLAYLIST_SONG,
+                        LibraryItem.QUEUE_SONG,
+                        ItemListKey.ALBUM_DETAIL,
+                        ItemListKey.FULL_SCREEN,
+                        ItemListKey.SIDE_QUEUE,
+                    ];
+
+                    listKeysToUpdate.forEach((listKey) => {
+                        const listConfig = state.lists[listKey];
+                        if (listConfig?.table?.columns) {
+                            const columns = listConfig.table.columns;
+                            const hasComposer = columns.some(
+                                (col) => col.id === TableColumn.COMPOSER,
+                            );
+                            if (!hasComposer) {
+                                const artistIndex = columns.findIndex(
+                                    (col) => col.id === TableColumn.ARTIST,
+                                );
+                                if (artistIndex >= 0) {
+                                    columns.splice(artistIndex + 1, 0, composerColumn);
+                                } else {
+                                    columns.push(composerColumn);
+                                }
+                            }
+                        }
+                    });
+                }
+
                 return persistedState;
             },
             name: 'store_settings',
-            version: 20,
+            version: 22,
         },
     ),
 );
@@ -2114,6 +2150,9 @@ export const useExternalLinks = () =>
 
 export const useHomeFeature = () => useSettingsStore((state) => state.general.homeFeature, shallow);
 
+export const useHomeFeatureStyle = () =>
+    useSettingsStore((state) => state.general.homeFeatureStyle);
+
 export const useHomeItems = () => useSettingsStore((state) => state.general.homeItems, shallow);
 
 export const useArtistItems = () => useSettingsStore((state) => state.general.artistItems, shallow);
@@ -2150,3 +2189,30 @@ export const useShowVisualizerInSidebar = () =>
 export const useAutoDJSettings = () => useSettingsStore((store) => store.autoDJ, shallow);
 
 export const useVisualizerSettings = () => useSettingsStore((store) => store.visualizer, shallow);
+
+export const subscribeButterchurnPreset = (
+    onChange: (preset: string | undefined, prevPreset: string | undefined) => void,
+) => {
+    return useSettingsStore.subscribe(
+        (state) => state.visualizer.butterchurn.currentPreset,
+        (preset, prevPreset) => {
+            onChange(preset, prevPreset);
+        },
+    );
+};
+
+export const useButterchurnSettings = () => {
+    return useSettingsStore((store) => {
+        return {
+            blendTime: store.visualizer.butterchurn.blendTime,
+            cyclePresets: store.visualizer.butterchurn.cyclePresets,
+            cycleTime: store.visualizer.butterchurn.cycleTime,
+            ignoredPresets: store.visualizer.butterchurn.ignoredPresets,
+            includeAllPresets: store.visualizer.butterchurn.includeAllPresets,
+            maxFPS: store.visualizer.butterchurn.maxFPS,
+            opacity: store.visualizer.butterchurn.opacity,
+            randomizeNextPreset: store.visualizer.butterchurn.randomizeNextPreset,
+            selectedPresets: store.visualizer.butterchurn.selectedPresets,
+        };
+    }, shallow);
+};

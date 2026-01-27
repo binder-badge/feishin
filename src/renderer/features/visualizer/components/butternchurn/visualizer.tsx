@@ -1,17 +1,28 @@
-import butterchurn from 'butterchurn';
-import butterchurnPresets from 'butterchurn-presets';
-import { createRef, useEffect, useRef, useState } from 'react';
+import { createRef, useCallback, useEffect, useRef, useState } from 'react';
 
 import styles from './visualizer.module.css';
 
 import { useWebAudio } from '/@/renderer/features/player/hooks/use-webaudio';
 import { openVisualizerSettingsModal } from '/@/renderer/features/player/utils/open-visualizer-settings-modal';
 import { ComponentErrorBoundary } from '/@/renderer/features/shared/components/component-error-boundary';
-import { useSettingsStore, useSettingsStoreActions } from '/@/renderer/store';
+import {
+    subscribeButterchurnPreset,
+    useButterchurnSettings,
+    useSettingsStore,
+    useSettingsStoreActions,
+} from '/@/renderer/store';
+import {
+    useFullScreenPlayerStore,
+    useFullScreenPlayerStoreActions,
+} from '/@/renderer/store/full-screen-player.store';
 import { usePlayerStatus } from '/@/renderer/store/player.store';
 import { ActionIcon } from '/@/shared/components/action-icon/action-icon';
+import { Group } from '/@/shared/components/group/group';
 import { Text } from '/@/shared/components/text/text';
 import { PlayerStatus } from '/@/shared/types/types';
+
+// Ignore presets that are erroring out
+const IGNORED_PRESETS = ['Flexi + Martin - astral projection'];
 
 type ButterchurnVisualizer = {
     connectAudio: (audioNode: AudioNode) => void;
@@ -20,6 +31,13 @@ type ButterchurnVisualizer = {
     setRendererSize: (width: number, height: number) => void;
 };
 
+export function getButterchurnPresetOptions(presets: Record<string, string>) {
+    if (!presets) return [];
+    return Object.fromEntries(
+        Object.entries(presets).filter(([preset]) => !IGNORED_PRESETS.includes(preset)),
+    );
+}
+
 const VisualizerInner = () => {
     const { webAudio } = useWebAudio();
     const canvasRef = createRef<HTMLCanvasElement>();
@@ -27,17 +45,49 @@ const VisualizerInner = () => {
     const visualizerRef = useRef<ButterchurnVisualizer | undefined>(undefined);
     const isInitializedRef = useRef(false);
     const [isVisualizerReady, setIsVisualizerReady] = useState(false);
+    const [librariesLoaded, setLibrariesLoaded] = useState(false);
+    const butterchurnRef = useRef<any>(null);
+    const butterchurnPresetsRef = useRef<any>(null);
     const animationFrameRef = useRef<number | undefined>(undefined);
     const resizeObserverRef = useRef<ResizeObserver | undefined>(undefined);
     const cycleTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
     const cycleStartTimeRef = useRef<number | undefined>(undefined);
     const pauseTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
     const initialPresetLoadedRef = useRef(false);
-    const butterchurnSettings = useSettingsStore((store) => store.visualizer.butterchurn);
+    const butterchurnSettings = useButterchurnSettings();
     const opacity = useSettingsStore((store) => store.visualizer.butterchurn.opacity);
     const { setSettings } = useSettingsStoreActions();
     const playerStatus = usePlayerStatus();
     const isPlaying = playerStatus === PlayerStatus.PLAYING;
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadLibraries = async () => {
+            try {
+                const [butterchurnModule, presetsModule] = await Promise.all([
+                    import('butterchurn'),
+                    import('butterchurn-presets'),
+                ]);
+
+                if (isMounted) {
+                    butterchurnRef.current = butterchurnModule.default;
+                    butterchurnPresetsRef.current = butterchurnPresetsRef.current =
+                        getButterchurnPresetOptions(presetsModule.default);
+
+                    setLibrariesLoaded(true);
+                }
+            } catch (error) {
+                console.error('Failed to load butterchurn libraries:', error);
+            }
+        };
+
+        loadLibraries();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     const cleanupVisualizer = () => {
         if (animationFrameRef.current) {
@@ -79,6 +129,7 @@ const VisualizerInner = () => {
             canvas &&
             container &&
             isPlaying &&
+            librariesLoaded &&
             (!isInitializedRef.current || !visualizerRef.current);
 
         if (!needsInitialization) {
@@ -107,13 +158,16 @@ const VisualizerInner = () => {
             initializeVisualizer(dimensions.width, dimensions.height);
         }
 
-        function initializeVisualizer(width: number, height: number) {
-            if (!gains || gains.length === 0 || !canvas || !context) return;
+        async function initializeVisualizer(width: number, height: number) {
+            if (!gains || gains.length === 0 || !canvas || !context || !librariesLoaded) return;
 
             canvas.width = width;
             canvas.height = height;
 
             try {
+                const butterchurn = butterchurnRef.current;
+                if (!butterchurn) return;
+
                 const butterchurnInstance = butterchurn.createVisualizer(context, canvas, {
                     height,
                     width,
@@ -138,7 +192,7 @@ const VisualizerInner = () => {
             cleanupVisualizer();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [webAudio, isPlaying]);
+    }, [webAudio, isPlaying, librariesLoaded]);
 
     // Kill visualizer after 5 seconds of pause
     useEffect(() => {
@@ -204,16 +258,17 @@ const VisualizerInner = () => {
     // Load initial preset when visualizer is ready
     useEffect(() => {
         const visualizer = visualizerRef.current;
-        if (!visualizer || !isVisualizerReady || initialPresetLoadedRef.current) return;
+        if (!visualizer || !isVisualizerReady || initialPresetLoadedRef.current || !librariesLoaded)
+            return;
 
-        const presets = butterchurnPresets;
+        const presets = butterchurnPresetsRef.current;
+        if (!presets) return;
         const presetNames = Object.keys(presets);
 
         if (presetNames.length > 0) {
+            const currentPreset = useSettingsStore.getState().visualizer.butterchurn.currentPreset;
             const presetName =
-                butterchurnSettings.currentPreset && presets[butterchurnSettings.currentPreset]
-                    ? butterchurnSettings.currentPreset
-                    : presetNames[0];
+                currentPreset && presets[currentPreset] ? currentPreset : presetNames[0];
             const preset = presets[presetName];
 
             if (preset) {
@@ -222,37 +277,14 @@ const VisualizerInner = () => {
                 initialPresetLoadedRef.current = true;
             }
         }
-    }, [isVisualizerReady, butterchurnSettings.currentPreset, butterchurnSettings.blendTime]);
+    }, [isVisualizerReady, butterchurnSettings.blendTime, librariesLoaded]);
 
-    // Update preset when currentPreset or blendTime changes (but not when cycling)
     const isCyclingRef = useRef(false);
-
-    useEffect(() => {
-        const visualizer = visualizerRef.current;
-        if (!visualizer || !butterchurnSettings.currentPreset || !initialPresetLoadedRef.current)
-            return;
-
-        // Skip if we're currently cycling (to avoid reloading preset)
-        if (isCyclingRef.current) {
-            isCyclingRef.current = false;
-            return;
-        }
-
-        const presets = butterchurnPresets;
-        const preset = presets[butterchurnSettings.currentPreset];
-
-        if (preset) {
-            visualizer.loadPreset(preset, butterchurnSettings.blendTime || 0.0);
-            // Reset cycle timer when preset changes manually
-            cycleStartTimeRef.current = Date.now();
-        }
-    }, [butterchurnSettings.currentPreset, butterchurnSettings.blendTime]);
 
     // Handle preset cycling
     useEffect(() => {
         const visualizer = visualizerRef.current;
-        if (!visualizer || !butterchurnSettings.cyclePresets || !initialPresetLoadedRef.current) {
-            // Clear cycle timer if cycling is disabled or visualizer not ready
+        if (!visualizer || !butterchurnSettings.cyclePresets || !librariesLoaded) {
             if (cycleTimerRef.current) {
                 clearInterval(cycleTimerRef.current);
                 cycleTimerRef.current = undefined;
@@ -260,7 +292,9 @@ const VisualizerInner = () => {
             return;
         }
 
-        const presets = butterchurnPresets;
+        const presets = butterchurnPresetsRef.current;
+
+        if (!presets) return;
         const allPresetNames = Object.keys(presets);
 
         // Get the list of presets to cycle through
@@ -286,7 +320,8 @@ const VisualizerInner = () => {
             const currentVisualizer = visualizerRef.current;
             if (!currentVisualizer) return;
 
-            const currentPresetName = butterchurnSettings.currentPreset;
+            const currentPresetName =
+                useSettingsStore.getState().visualizer.butterchurn.currentPreset;
             let nextPresetName: string;
 
             if (butterchurnSettings.randomizeNextPreset) {
@@ -309,16 +344,12 @@ const VisualizerInner = () => {
 
             const nextPreset = presets[nextPresetName];
             if (nextPreset) {
-                // Get current settings to ensure we use the latest blendTime
                 const currentSettings = useSettingsStore.getState().visualizer.butterchurn;
 
-                // Mark that we're cycling to prevent the preset change effect from running
                 isCyclingRef.current = true;
 
-                // Load the preset with blending
                 currentVisualizer.loadPreset(nextPreset, currentSettings.blendTime || 0.0);
 
-                // Update currentPreset in settings
                 setSettings({
                     visualizer: {
                         butterchurn: {
@@ -331,7 +362,6 @@ const VisualizerInner = () => {
             }
         };
 
-        // Check every second if it's time to cycle
         cycleTimerRef.current = setInterval(() => {
             if (cycleStartTimeRef.current === undefined) {
                 cycleStartTimeRef.current = Date.now();
@@ -357,8 +387,8 @@ const VisualizerInner = () => {
         butterchurnSettings.selectedPresets,
         butterchurnSettings.ignoredPresets,
         butterchurnSettings.randomizeNextPreset,
-        butterchurnSettings.currentPreset,
         setSettings,
+        librariesLoaded,
     ]);
 
     useEffect(() => {
@@ -396,8 +426,40 @@ const VisualizerInner = () => {
         };
     }, [isVisualizerReady, butterchurnSettings.maxFPS]);
 
-    // Render container when playing (for initialization) or when visualizer exists
-    // Canvas must always be rendered when container is rendered so refs are available
+    // Handle preset changes via subscriber
+    useEffect(() => {
+        const unsubscribe = subscribeButterchurnPreset((presetName) => {
+            const visualizer = visualizerRef.current;
+            if (
+                !visualizer ||
+                !isVisualizerReady ||
+                !librariesLoaded ||
+                !presetName ||
+                !initialPresetLoadedRef.current
+            ) {
+                return;
+            }
+
+            if (isCyclingRef.current) {
+                isCyclingRef.current = false;
+                return;
+            }
+
+            const presets = butterchurnPresetsRef.current;
+            if (!presets) return;
+
+            const preset = presets[presetName];
+            if (preset && typeof preset === 'object') {
+                visualizer.loadPreset(preset, butterchurnSettings.blendTime || 0.0);
+                cycleStartTimeRef.current = Date.now();
+            }
+        });
+
+        return () => {
+            unsubscribe();
+        };
+    }, [isVisualizerReady, librariesLoaded, butterchurnSettings.blendTime]);
+
     const shouldRenderContainer = isPlaying || isVisualizerReady;
 
     if (!shouldRenderContainer) {
@@ -411,28 +473,164 @@ const VisualizerInner = () => {
             style={{ opacity: isVisualizerReady ? opacity : 0 }}
         >
             <canvas className={styles.canvas} ref={canvasRef} />
-            {isVisualizerReady && butterchurnSettings.currentPreset && (
-                <Text className={styles['preset-overlay']} isNoSelect size="sm">
-                    {butterchurnSettings.currentPreset}
-                </Text>
-            )}
+            {isVisualizerReady && <CurrentPresetDisplay />}
         </div>
     );
 };
 
+const CurrentPresetDisplay = () => {
+    const currentPreset = useSettingsStore.getState().visualizer.butterchurn.currentPreset;
+    return (
+        <Text className={styles['preset-overlay']} isNoSelect size="sm">
+            {currentPreset}
+        </Text>
+    );
+};
+
 export const Visualizer = () => {
+    const { visualizerExpanded } = useFullScreenPlayerStore();
+    const { setStore } = useFullScreenPlayerStoreActions();
+    const { setSettings } = useSettingsStoreActions();
+    const butterchurnSettings = useButterchurnSettings();
+    const [presetsLoaded, setPresetsLoaded] = useState(false);
+    const butterchurnPresetsRef = useRef<any>(null);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadPresets = async () => {
+            try {
+                const presetsModule = await import('butterchurn-presets');
+                if (isMounted) {
+                    butterchurnPresetsRef.current = getButterchurnPresetOptions(
+                        presetsModule.default,
+                    );
+                    setPresetsLoaded(true);
+                }
+            } catch (error) {
+                console.error('Failed to load butterchurn presets:', error);
+            }
+        };
+
+        loadPresets();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    const getPresetList = useCallback(() => {
+        const presets = butterchurnPresetsRef.current;
+        if (!presets) return [];
+
+        const allPresetNames = Object.keys(presets);
+
+        let presetList = butterchurnSettings.includeAllPresets
+            ? allPresetNames
+            : butterchurnSettings.selectedPresets.length > 0
+              ? butterchurnSettings.selectedPresets.filter((name) => presets[name])
+              : allPresetNames;
+
+        if (butterchurnSettings.ignoredPresets && butterchurnSettings.ignoredPresets.length > 0) {
+            presetList = presetList.filter(
+                (name) => !butterchurnSettings.ignoredPresets.includes(name),
+            );
+        }
+
+        return presetList;
+    }, [
+        butterchurnSettings.includeAllPresets,
+        butterchurnSettings.selectedPresets,
+        butterchurnSettings.ignoredPresets,
+    ]);
+
+    const handleToggleFullscreen = () => {
+        setStore({ expanded: false, visualizerExpanded: !visualizerExpanded });
+    };
+
+    const handleNextPreset = () => {
+        if (!presetsLoaded) return;
+
+        const presetList = getPresetList();
+        if (presetList.length === 0) return;
+
+        const currentPresetName = useSettingsStore.getState().visualizer.butterchurn.currentPreset;
+        const currentIndex = currentPresetName ? presetList.indexOf(currentPresetName) : -1;
+        const nextIndex =
+            currentIndex >= 0 && currentIndex < presetList.length - 1 ? currentIndex + 1 : 0;
+        const nextPresetName = presetList[nextIndex];
+
+        setSettings({
+            visualizer: {
+                butterchurn: {
+                    currentPreset: nextPresetName,
+                },
+            },
+        });
+    };
+
+    const handlePreviousPreset = () => {
+        if (!presetsLoaded) return;
+
+        const presetList = getPresetList();
+        if (presetList.length === 0) return;
+
+        const currentPresetName = useSettingsStore.getState().visualizer.butterchurn.currentPreset;
+        const currentIndex = currentPresetName ? presetList.indexOf(currentPresetName) : -1;
+        const prevIndex = currentIndex > 0 ? currentIndex - 1 : presetList.length - 1;
+        const prevPresetName = presetList[prevIndex];
+
+        setSettings({
+            visualizer: {
+                butterchurn: {
+                    currentPreset: prevPresetName,
+                },
+            },
+        });
+    };
+
     return (
         <div className={styles.container}>
-            <ActionIcon
-                className={styles.settingsIcon}
-                icon="settings2"
-                iconProps={{ size: 'lg' }}
-                onClick={openVisualizerSettingsModal}
+            <Group
+                className={styles.iconGroup}
+                gap="xs"
                 pos="absolute"
                 right="var(--theme-spacing-sm)"
                 top="var(--theme-spacing-sm)"
-                variant="subtle"
-            />
+            >
+                <ActionIcon
+                    icon="expand"
+                    iconProps={{ size: 'lg' }}
+                    onClick={handleToggleFullscreen}
+                    variant="subtle"
+                />
+                <ActionIcon
+                    icon="settings2"
+                    iconProps={{ size: 'lg' }}
+                    onClick={openVisualizerSettingsModal}
+                    variant="subtle"
+                />
+            </Group>
+            <Group
+                className={styles.iconGroup}
+                gap="xs"
+                pos="absolute"
+                right="var(--theme-spacing-sm)"
+                style={{ bottom: 'var(--theme-spacing-sm)' }}
+            >
+                <ActionIcon
+                    icon="arrowLeftS"
+                    iconProps={{ size: 'lg' }}
+                    onClick={handlePreviousPreset}
+                    variant="subtle"
+                />
+                <ActionIcon
+                    icon="arrowRightS"
+                    iconProps={{ size: 'lg' }}
+                    onClick={handleNextPreset}
+                    variant="subtle"
+                />
+            </Group>
             <ComponentErrorBoundary>
                 <VisualizerInner />
             </ComponentErrorBoundary>

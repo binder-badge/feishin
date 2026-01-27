@@ -6,9 +6,9 @@ import { PopoverPlayQueue } from '/@/renderer/features/now-playing/components/po
 import { PlayerConfig } from '/@/renderer/features/player/components/player-config';
 import { CustomPlayerbarSlider } from '/@/renderer/features/player/components/playerbar-slider';
 import { usePlayer } from '/@/renderer/features/player/context/player-context';
+import { useSetRating } from '/@/renderer/features/shared/hooks/use-set-rating';
 import { useCreateFavorite } from '/@/renderer/features/shared/mutations/create-favorite-mutation';
 import { useDeleteFavorite } from '/@/renderer/features/shared/mutations/delete-favorite-mutation';
-import { useSetRating } from '/@/renderer/features/shared/mutations/set-rating-mutation';
 import {
     useAppStoreActions,
     useAutoDJSettings,
@@ -119,8 +119,18 @@ const QueueButton = () => {
 
     const { bindings } = useHotkeySettings();
 
+    const [popoverOpened, setPopoverOpened] = useState(false);
+
     const handleToggleQueue = () => {
-        setSideBar({ rightExpanded: !isSidebarRightExpanded });
+        if (sideQueueType === 'sideQueue') {
+            setSideBar({ rightExpanded: !isSidebarRightExpanded });
+        } else {
+            setPopoverOpened((prev) => !prev);
+        }
+    };
+
+    const handlePopoverClose = () => {
+        setPopoverOpened(false);
     };
 
     useHotkeys([
@@ -153,7 +163,13 @@ const QueueButton = () => {
         );
     }
 
-    return <PopoverPlayQueue />;
+    return (
+        <PopoverPlayQueue
+            onClose={handlePopoverClose}
+            onToggle={handleToggleQueue}
+            opened={popoverOpened}
+        />
+    );
 };
 
 const LyricsButton = () => {
@@ -308,7 +324,7 @@ const useFavoritePreviousSongHotkeys = ({
 const RatingButton = () => {
     const server = useCurrentServer();
     const currentSong = usePlayerSong();
-    const updateRatingMutation = useSetRating({});
+    const setRating = useSetRating();
 
     const isSongDefined = Boolean(currentSong?.id);
     const showRating =
@@ -318,14 +334,7 @@ const RatingButton = () => {
     const handleUpdateRating = (rating: number) => {
         if (!currentSong) return;
 
-        updateRatingMutation.mutate({
-            apiClientProps: { serverId: currentSong?._serverId || '' },
-            query: {
-                id: [currentSong.id],
-                rating,
-                type: LibraryItem.SONG,
-            },
-        });
+        setRating(currentSong._serverId, [currentSong.id], LibraryItem.SONG, rating);
     };
 
     const { bindings } = useHotkeySettings();
@@ -439,6 +448,9 @@ const VolumeButton = () => {
                     max={100}
                     min={0}
                     onChange={handleVolumeSlider}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                    }}
                     onWheel={handleVolumeWheel}
                     size={6}
                     value={sliderValue}

@@ -402,6 +402,7 @@ const AlbumArtistMetadataTopSongsContent = ({
                     data={filteredSongs}
                     enableAlternateRowColors={tableConfig.enableAlternateRowColors}
                     enableDrag
+                    enableDragScroll={false}
                     enableExpansion={false}
                     enableHeader
                     enableHorizontalBorders={tableConfig.enableHorizontalBorders}
@@ -740,7 +741,7 @@ interface AlbumSectionProps {
     title: React.ReactNode | string;
 }
 
-const MAX_SECTION_CARDS = 20;
+const MAX_SECTION_CARDS = 100;
 
 const getItemsPerRow = (cq: ReturnType<typeof useContainerQuery>) => {
     // Match grid carousel breakpoints: is3xl: 8, is2xl: 7, isXl: 6, isLg: 5, isMd: 4, isSm: 3, default: 2
@@ -981,71 +982,30 @@ const groupAlbumsByReleaseType = (
                 return acc;
             }
 
-            // Priority 2: Compilations
-            if (album.isCompilation) {
-                const compilationKey = 'compilation';
-                if (!acc[compilationKey]) {
-                    acc[compilationKey] = [];
-                }
-                acc[compilationKey].push(album);
-                return acc;
+            const releaseTypes = album.releaseTypes || [];
+            const normalizedTypes = releaseTypes.map((type) => type.toLowerCase());
+
+            let matchedType: null | string = null;
+
+            if (normalizedTypes.includes('album')) {
+                matchedType = 'album';
+            } else if (normalizedTypes.includes('single')) {
+                matchedType = 'single';
+            } else if (normalizedTypes.includes('ep')) {
+                matchedType = 'ep';
+            } else if (normalizedTypes.includes('broadcast')) {
+                matchedType = 'broadcast';
+            } else if (normalizedTypes.includes('other')) {
+                matchedType = 'other';
+            } else {
+                matchedType = 'album';
             }
 
-            // Priority 3: EP
-            const hasEPType = album.releaseTypes?.some((type) => type.toLowerCase() === 'ep');
-            if (hasEPType) {
-                const epKey = 'ep';
-                if (!acc[epKey]) {
-                    acc[epKey] = [];
-                }
-                acc[epKey].push(album);
-                return acc;
+            const releaseTypeKey = matchedType;
+            if (!acc[releaseTypeKey]) {
+                acc[releaseTypeKey] = [];
             }
-
-            // Priority 4: Single (other non-album types)
-            const hasSingleType = album.releaseTypes?.some(
-                (type) => type.toLowerCase() === 'single',
-            );
-            if (hasSingleType) {
-                const singleKey = 'single';
-                if (!acc[singleKey]) {
-                    acc[singleKey] = [];
-                }
-                acc[singleKey].push(album);
-                return acc;
-            }
-
-            // Priority 5: Broadcast (if has album type)
-            const hasBroadcastType = album.releaseTypes?.some(
-                (type) => type.toLowerCase() === 'broadcast',
-            );
-
-            if (hasBroadcastType) {
-                const broadcastKey = 'broadcast';
-                if (!acc[broadcastKey]) {
-                    acc[broadcastKey] = [];
-                }
-                acc[broadcastKey].push(album);
-                return acc;
-            }
-
-            // Priority 6: Other
-            const hasOtherType = album.releaseTypes?.some((type) => type.toLowerCase() === 'other');
-            if (hasOtherType) {
-                const otherKey = 'other';
-                if (!acc[otherKey]) {
-                    acc[otherKey] = [];
-                }
-                acc[otherKey].push(album);
-                return acc;
-            }
-
-            // Priority 7: Album (falls back all unknown release types to album)
-            const albumKey = 'album';
-            if (!acc[albumKey]) {
-                acc[albumKey] = [];
-            }
-            acc[albumKey].push(album);
+            acc[releaseTypeKey].push(album);
             return acc;
         },
         {} as Record<string, Album[]>,

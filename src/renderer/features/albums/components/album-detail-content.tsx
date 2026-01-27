@@ -1,10 +1,17 @@
-import { useQuery } from '@tanstack/react-query';
-import { ReactNode, Suspense, useMemo, useRef, useState } from 'react';
+import type {
+    ItemListStateActions,
+    ItemListStateItemWithRequiredProperties,
+} from '/@/renderer/components/item-list/helpers/item-list-state';
+
+import { useSuspenseQuery } from '@tanstack/react-query';
+import { ReactNode, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { generatePath, useParams } from 'react-router';
 
 import styles from './album-detail-content.module.css';
 
+import { useGridCarouselContainerQuery } from '/@/renderer/components/grid-carousel/grid-carousel-v2';
+import { useItemListStateSubscription } from '/@/renderer/components/item-list/helpers/item-list-state';
 import { useItemListColumnReorder } from '/@/renderer/components/item-list/helpers/use-item-list-column-reorder';
 import { useItemListColumnResize } from '/@/renderer/components/item-list/helpers/use-item-list-column-resize';
 import { SONG_TABLE_COLUMNS } from '/@/renderer/components/item-list/item-table-list/default-columns';
@@ -17,21 +24,20 @@ import { usePlayer } from '/@/renderer/features/player/context/player-context';
 import { ListConfigMenu } from '/@/renderer/features/shared/components/list-config-menu';
 import { ListSortByDropdownControlled } from '/@/renderer/features/shared/components/list-sort-by-dropdown';
 import { ListSortOrderToggleButtonControlled } from '/@/renderer/features/shared/components/list-sort-order-toggle-button';
-import { searchLibraryItems } from '/@/renderer/features/shared/utils';
-import { useContainerQuery } from '/@/renderer/hooks';
+import { FILTER_KEYS, searchLibraryItems } from '/@/renderer/features/shared/utils';
 import { AppRoute } from '/@/renderer/router/routes';
 import { useCurrentServer, usePlayerSong } from '/@/renderer/store';
 import { useExternalLinks, useSettingsStore } from '/@/renderer/store/settings.store';
 import { sentenceCase, titleCase } from '/@/renderer/utils';
 import { replaceURLWithHTMLLinks } from '/@/renderer/utils/linkify';
 import { normalizeReleaseTypes } from '/@/renderer/utils/normalize-release-types';
+import { setJsonSearchParam } from '/@/renderer/utils/query-params';
 import { sortSongList } from '/@/shared/api/utils';
 import { ActionIcon } from '/@/shared/components/action-icon/action-icon';
 import { Checkbox } from '/@/shared/components/checkbox/checkbox';
 import { Group } from '/@/shared/components/group/group';
 import { Icon } from '/@/shared/components/icon/icon';
 import { Pill, PillLink } from '/@/shared/components/pill/pill';
-import { Spinner } from '/@/shared/components/spinner/spinner';
 import { Spoiler } from '/@/shared/components/spoiler/spoiler';
 import { Stack } from '/@/shared/components/stack/stack';
 import { TextInput } from '/@/shared/components/text-input/text-input';
@@ -43,6 +49,7 @@ import {
     AlbumListSort,
     ExplicitStatus,
     LibraryItem,
+    ServerType,
     Song,
     SongListSort,
     SortOrder,
@@ -107,12 +114,6 @@ const AlbumMetadataTags = ({ album }: AlbumMetadataTagsProps) => {
                 value: status,
             })) || [];
 
-        const recordLabels =
-            album.recordLabels?.map((label) => ({
-                id: label,
-                value: label,
-            })) || [];
-
         const items: Array<{ id: string; value: ReactNode | string | undefined }> = [];
 
         items.push(
@@ -125,7 +126,6 @@ const AlbumMetadataTags = ({ album }: AlbumMetadataTagsProps) => {
             },
             ...releaseCountries,
             ...releaseStatuses,
-            ...recordLabels,
             {
                 id: 'explicitStatus',
                 value:
@@ -149,12 +149,67 @@ const AlbumMetadataTags = ({ album }: AlbumMetadataTagsProps) => {
         }));
     }, [album]);
 
+    const recordLabels = useMemo(() => {
+        if (!album?.recordLabels || album.recordLabels.length === 0) return [];
+
+        return album.recordLabels.map((label) => {
+            if (album._serverType === ServerType.SUBSONIC) {
+                return { id: label, label: label, url: null };
+            }
+
+            const searchParams = new URLSearchParams();
+            const customFilters =
+                album._serverType === ServerType.JELLYFIN
+                    ? { Studios: [label] }
+                    : { recordlabel: [label] };
+            const paramsWithCustom = setJsonSearchParam(
+                searchParams,
+                FILTER_KEYS.ALBUM._CUSTOM,
+                customFilters,
+            );
+            const url = `${AppRoute.LIBRARY_ALBUMS}?${paramsWithCustom.toString()}`;
+
+            return {
+                id: label,
+                label,
+                url,
+            };
+        });
+    }, [album]);
+
     return (
         <>
             <MetadataPillGroup
                 items={defaultTagItems}
                 title={t('common.tags', { postProcess: 'sentenceCase' })}
             />
+
+            {recordLabels.length > 0 && (
+                <Stack align="center" className={styles.metadataPillGroup} gap="xs">
+                    <Text fw={600} isNoSelect size="sm" tt="uppercase">
+                        {t('common.recordLabel', { postProcess: 'sentenceCase' })}
+                    </Text>
+                    <div className={styles['pill-group-wrapper']}>
+                        <Pill.Group>
+                            {recordLabels.map((recordLabel) =>
+                                recordLabel.url ? (
+                                    <PillLink
+                                        key={`recordlabel-${recordLabel.id}`}
+                                        size="md"
+                                        to={recordLabel.url}
+                                    >
+                                        {recordLabel.label}
+                                    </PillLink>
+                                ) : (
+                                    <Pill key={`recordlabel-${recordLabel.id}`} size="md">
+                                        {recordLabel.label}
+                                    </Pill>
+                                ),
+                            )}
+                        </Pill.Group>
+                    </div>
+                </Stack>
+            )}
 
             <MetadataPillGroup
                 items={moodTagItems}
@@ -304,67 +359,13 @@ const AlbumMetadataExternalLinks = ({
 };
 
 export const AlbumDetailContent = () => {
-    const { t } = useTranslation();
     const { albumId } = useParams() as { albumId: string };
     const server = useCurrentServer();
-    const detailQuery = useQuery(
+    const detailQuery = useSuspenseQuery(
         albumQueries.detail({ query: { id: albumId }, serverId: server.id }),
     );
 
-    const { ref, ...cq } = useContainerQuery();
     const { externalLinks, lastFM, musicBrainz } = useExternalLinks();
-
-    const genreCarousels = useMemo(() => {
-        const genreLimit = 2;
-        const selectedGenres = detailQuery?.data?.genres?.slice(0, genreLimit);
-
-        if (!selectedGenres || selectedGenres.length === 0) return [];
-
-        return selectedGenres
-            .map((genre) => {
-                const uniqueId = `moreFromGenre-${genre.id}`;
-                return {
-                    enableRefresh: true,
-                    excludeIds: detailQuery?.data?.id ? [detailQuery.data.id] : undefined,
-                    isHidden: !genre,
-                    query: {
-                        genreIds: [genre.id],
-                    },
-                    rowCount: 1,
-                    sortBy: AlbumListSort.RANDOM,
-                    sortOrder: SortOrder.ASC,
-                    title: sentenceCase(
-                        t('page.albumDetail.moreFromGeneric', {
-                            item: genre.name,
-                        }),
-                    ),
-                    uniqueId,
-                };
-            })
-            .filter((carousel) => !carousel.isHidden);
-    }, [detailQuery.data, t]);
-
-    const carousels = useMemo(() => {
-        const moreFromArtistUniqueId = 'moreFromArtist';
-        return [
-            {
-                enableRefresh: false,
-                excludeIds: detailQuery?.data?.id ? [detailQuery.data.id] : undefined,
-                isHidden: !detailQuery?.data?.albumArtists?.[0]?.id,
-                query: {
-                    artistIds: detailQuery?.data?.albumArtists.length
-                        ? [detailQuery?.data?.albumArtists[0].id]
-                        : undefined,
-                },
-                rowCount: 1,
-                sortBy: AlbumListSort.YEAR,
-                sortOrder: SortOrder.DESC,
-                title: t('page.albumDetail.moreFromArtist', { postProcess: 'sentenceCase' }),
-                uniqueId: moreFromArtistUniqueId,
-            },
-            ...genreCarousels,
-        ];
-    }, [detailQuery.data, genreCarousels, t]);
 
     const comment = detailQuery?.data?.comment;
 
@@ -374,7 +375,7 @@ export const AlbumDetailContent = () => {
     const mbzId = detailQuery?.data?.mbzId;
 
     return (
-        <div className={styles.contentContainer} ref={ref}>
+        <div className={styles.contentContainer}>
             <div className={styles.detailContainer}>
                 {comment && (
                     <Spoiler maxHeight={75}>
@@ -388,7 +389,6 @@ export const AlbumDetailContent = () => {
                         )}
                     </div>
                     <div className={styles.metadataColumn}>
-                        {/* <AlbumMetadataArtists artists={detailQuery?.data?.albumArtists} /> */}
                         <AlbumMetadataGenres genres={detailQuery?.data?.genres} />
                         <AlbumMetadataTags album={detailQuery?.data} />
                         <AlbumMetadataExternalLinks
@@ -410,26 +410,7 @@ export const AlbumDetailContent = () => {
                         ))}
                     </Stack>
                 )}
-                <Stack gap="lg" mt="3rem">
-                    {cq.height || cq.width ? (
-                        <Suspense fallback={<Spinner container />}>
-                            {carousels
-                                .filter((c) => !c.isHidden)
-                                .map((carousel) => (
-                                    <AlbumInfiniteCarousel
-                                        enableRefresh={carousel.enableRefresh}
-                                        excludeIds={carousel.excludeIds}
-                                        key={`carousel-${carousel.uniqueId}`}
-                                        query={carousel.query}
-                                        rowCount={carousel.rowCount}
-                                        sortBy={carousel.sortBy}
-                                        sortOrder={carousel.sortOrder}
-                                        title={carousel.title}
-                                    />
-                                ))}
-                        </Suspense>
-                    ) : null}
-                </Stack>
+                <AlbumDetailCarousels data={detailQuery?.data} />
             </div>
         </div>
     );
@@ -437,6 +418,156 @@ export const AlbumDetailContent = () => {
 
 interface AlbumDetailSongsTableProps {
     songs: Song[];
+}
+
+interface DiscGroupRowProps {
+    discGroup: {
+        discNumber: number;
+        discSubtitle: null | string;
+    };
+    groupItems: unknown[];
+    internalState: ItemListStateActions;
+    t: (key: string, options?: any) => string;
+}
+
+const DiscGroupRow = ({ discGroup, groupItems, internalState, t }: DiscGroupRowProps) => {
+    const selectionVersion = useItemListStateSubscription(internalState, (state) =>
+        state ? state.version : 0,
+    );
+
+    const selectedCount = groupItems.filter((item) => {
+        if (!item || typeof item !== 'object' || !('id' in item)) return false;
+        const rowId = internalState.extractRowId(item);
+        return rowId ? internalState.isSelected(rowId) : false;
+    }).length;
+
+    const isAllSelected = selectedCount === groupItems.length;
+
+    void selectionVersion;
+
+    const handleCheckboxChange = () => {
+        const selectableItems = groupItems.filter(
+            (item): item is ItemListStateItemWithRequiredProperties =>
+                item !== null && typeof item === 'object',
+        );
+
+        if (isAllSelected) {
+            // Deselect all items in the group
+            const currentlySelected =
+                internalState.getSelected() as ItemListStateItemWithRequiredProperties[];
+            const groupItemIds = new Set(
+                selectableItems.map((item) => internalState.extractRowId(item)).filter(Boolean),
+            );
+            const itemsToKeep = currentlySelected.filter(
+                (item) => !groupItemIds.has(internalState.extractRowId(item) || ''),
+            );
+            internalState.setSelected(itemsToKeep);
+        } else {
+            // Select all items in the group (add to existing selection)
+            const currentlySelected =
+                internalState.getSelected() as ItemListStateItemWithRequiredProperties[];
+            const selectedIds = new Set(
+                currentlySelected.map((item) => internalState.extractRowId(item)).filter(Boolean),
+            );
+            const itemsToAdd = selectableItems.filter(
+                (item) => !selectedIds.has(internalState.extractRowId(item) || ''),
+            );
+            internalState.setSelected([...currentlySelected, ...itemsToAdd]);
+        }
+    };
+
+    return (
+        <Group align="center" h="100%" px="md" w="100%">
+            <Checkbox
+                checked={isAllSelected}
+                id={`disc-${discGroup.discNumber}`}
+                label={
+                    <Text component="label" size="sm" truncate>
+                        {t('common.disc', { postProcess: 'sentenceCase' })} {discGroup.discNumber}
+                        {discGroup.discSubtitle && ` - ${discGroup.discSubtitle}`}
+                    </Text>
+                }
+                onChange={handleCheckboxChange}
+                size="xs"
+            />
+        </Group>
+    );
+};
+
+function AlbumDetailCarousels({ data }: { data: Album }) {
+    const { t } = useTranslation();
+
+    const genreCarousels = useMemo(() => {
+        const genreLimit = 2;
+        const selectedGenres = data?.genres?.slice(0, genreLimit);
+
+        if (!selectedGenres || selectedGenres.length === 0) return [];
+
+        return selectedGenres
+            .map((genre) => {
+                const uniqueId = `moreFromGenre-${genre.id}`;
+                return {
+                    enableRefresh: true,
+                    excludeIds: data?.id ? [data.id] : undefined,
+                    isHidden: !genre,
+                    query: {
+                        genreIds: [genre.id],
+                    },
+                    rowCount: 1,
+                    sortBy: AlbumListSort.RANDOM,
+                    sortOrder: SortOrder.ASC,
+                    title: sentenceCase(
+                        t('page.albumDetail.moreFromGeneric', {
+                            item: genre.name,
+                        }),
+                    ),
+                    uniqueId,
+                };
+            })
+            .filter((carousel) => !carousel.isHidden);
+    }, [data, t]);
+
+    const carousels = useMemo(() => {
+        const moreFromArtistUniqueId = 'moreFromArtist';
+        return [
+            {
+                enableRefresh: false,
+                excludeIds: data?.id ? [data.id] : undefined,
+                isHidden: !data?.albumArtists?.[0]?.id,
+                query: {
+                    artistIds: data?.albumArtists.length ? [data?.albumArtists[0].id] : undefined,
+                },
+                rowCount: 1,
+                sortBy: AlbumListSort.YEAR,
+                sortOrder: SortOrder.DESC,
+                title: t('page.albumDetail.moreFromArtist', { postProcess: 'sentenceCase' }),
+                uniqueId: moreFromArtistUniqueId,
+            },
+            ...genreCarousels,
+        ];
+    }, [data.albumArtists, data.id, genreCarousels, t]);
+
+    const cq = useGridCarouselContainerQuery();
+
+    return (
+        <Stack gap="lg" mt="3rem" ref={cq.ref}>
+            {carousels
+                .filter((c) => !c.isHidden)
+                .map((carousel) => (
+                    <AlbumInfiniteCarousel
+                        containerQuery={cq}
+                        enableRefresh={carousel.enableRefresh}
+                        excludeIds={carousel.excludeIds}
+                        key={`carousel-${carousel.uniqueId}`}
+                        query={carousel.query}
+                        rowCount={carousel.rowCount}
+                        sortBy={carousel.sortBy}
+                        sortOrder={carousel.sortOrder}
+                        title={carousel.title}
+                    />
+                ))}
+        </Stack>
+    );
 }
 
 const AlbumDetailSongsTable = ({ songs }: AlbumDetailSongsTableProps) => {
@@ -531,65 +662,18 @@ const AlbumDetailSongsTable = ({ songs }: AlbumDetailSongsTableProps) => {
                 data: unknown[];
                 groupIndex: number;
                 index: number;
-                internalState: any;
+                internalState: ItemListStateActions;
                 startDataIndex: number;
             }) => {
                 const groupItems = data.slice(startDataIndex, startDataIndex + discGroup.itemCount);
 
-                const selectedCount = groupItems.filter((item) => {
-                    if (!item || typeof item !== 'object' || !('id' in item)) return false;
-                    const rowId = internalState.extractRowId(item);
-                    return rowId ? internalState.isSelected(rowId) : false;
-                }).length;
-
-                const isAllSelected = selectedCount === groupItems.length;
-
-                const handleCheckboxChange = () => {
-                    const selectableItems = groupItems;
-
-                    if (isAllSelected) {
-                        // Deselect all items in the group
-                        const currentlySelected = internalState.getSelected();
-                        const groupItemIds = new Set(
-                            selectableItems
-                                .map((item) => internalState.extractRowId(item))
-                                .filter(Boolean),
-                        );
-                        const itemsToKeep = currentlySelected.filter(
-                            (item) => !groupItemIds.has(internalState.extractRowId(item) || ''),
-                        );
-                        internalState.setSelected(itemsToKeep);
-                    } else {
-                        // Select all items in the group (add to existing selection)
-                        const currentlySelected = internalState.getSelected();
-                        const selectedIds = new Set(
-                            currentlySelected
-                                .map((item) => internalState.extractRowId(item))
-                                .filter(Boolean),
-                        );
-                        const itemsToAdd = selectableItems.filter(
-                            (item) => !selectedIds.has(internalState.extractRowId(item) || ''),
-                        );
-                        internalState.setSelected([...currentlySelected, ...itemsToAdd]);
-                    }
-                };
-
                 return (
-                    <Group align="center" h="100%" px="md" w="100%">
-                        <Checkbox
-                            checked={isAllSelected}
-                            id={`disc-${discGroup.discNumber}`}
-                            label={
-                                <Text component="label" size="sm" truncate>
-                                    {t('common.disc', { postProcess: 'sentenceCase' })}{' '}
-                                    {discGroup.discNumber}
-                                    {discGroup.discSubtitle && ` - ${discGroup.discSubtitle}`}
-                                </Text>
-                            }
-                            onChange={handleCheckboxChange}
-                            size="xs"
-                        />
-                    </Group>
+                    <DiscGroupRow
+                        discGroup={discGroup}
+                        groupItems={groupItems}
+                        internalState={internalState}
+                        t={t}
+                    />
                 );
             },
             rowHeight: 40,
@@ -687,6 +771,8 @@ const AlbumDetailSongsTable = ({ songs }: AlbumDetailSongsTableProps) => {
                 data={filteredSongs}
                 enableAlternateRowColors={tableConfig.enableAlternateRowColors}
                 enableDrag
+                enableDragScroll={false}
+                enableEntranceAnimation={false}
                 enableExpansion={false}
                 enableHeader
                 enableHorizontalBorders={tableConfig.enableHorizontalBorders}
